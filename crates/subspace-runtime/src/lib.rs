@@ -53,7 +53,7 @@ use sp_consensus_subspace::{
 };
 use sp_core::crypto::{ByteArray, KeyTypeId};
 use sp_core::OpaqueMetadata;
-use sp_executor::{FraudProof, OpaqueBundle};
+use sp_executor::{FraudProof, OpaqueBundle, SignedExecutionReceipt};
 use sp_runtime::traits::{AccountIdLookup, BlakeTwo256, NumberFor, Zero};
 use sp_runtime::transaction_validity::{TransactionSource, TransactionValidity};
 use sp_runtime::{
@@ -546,6 +546,24 @@ fn extract_bundles(extrinsics: Vec<OpaqueExtrinsic>) -> Vec<OpaqueBundle> {
         .collect()
 }
 
+fn extract_receipts(
+    extrinsics: Vec<UncheckedExtrinsic>,
+) -> Vec<SignedExecutionReceipt<BlockNumber, Hash, cirrus_primitives::Hash>> {
+    extrinsics
+        .into_iter()
+        .filter_map(|uxt| {
+            if let Call::Executor(pallet_executor::Call::submit_execution_receipt {
+                signed_execution_receipt,
+            }) = uxt.function
+            {
+                Some(signed_execution_receipt)
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
 fn extract_fraud_proof(ext: &UncheckedExtrinsic) -> Option<sp_executor::FraudProof> {
     match &ext.function {
         Call::Executor(pallet_executor::Call::submit_fraud_proof { fraud_proof }) => {
@@ -788,6 +806,12 @@ impl_runtime_apis! {
 
         fn extract_bundles(extrinsics: Vec<OpaqueExtrinsic>) -> Vec<OpaqueBundle> {
             extract_bundles(extrinsics)
+        }
+
+        fn extract_receipts(
+            extrinsics: Vec<<Block as BlockT>::Extrinsic>,
+        ) -> Vec<sp_executor::SignedExecutionReceipt<NumberFor<Block>, <Block as BlockT>::Hash, cirrus_primitives::Hash>> {
+            extract_receipts(extrinsics)
         }
 
         fn extrinsics_shuffling_seed(header: <Block as BlockT>::Header) -> Randomness {

@@ -131,7 +131,7 @@ where
 		Transaction = TransactionFor<Client, Block>,
 		Error = sp_consensus::Error,
 	>,
-	PClient: HeaderBackend<PBlock> + ProvideRuntimeApi<PBlock>,
+	PClient: HeaderBackend<PBlock> + BlockBackend<PBlock> + ProvideRuntimeApi<PBlock>,
 	PClient::Api: ExecutorApi<PBlock, Block::Hash>,
 	Backend: sc_client_api::Backend<Block>,
 {
@@ -301,6 +301,8 @@ where
 
 		// TODO: The applied txs can be fully removed from the transaction pool
 
+		self.check_receipts_in_primary_block(primary_number.into())?;
+
 		if self.primary_network.is_major_syncing() {
 			tracing::debug!(
 				target: LOG_TARGET,
@@ -308,6 +310,8 @@ where
 			);
 			return Ok(())
 		}
+
+		// TODO: Generate FraudProof for the first incorrect ER
 
 		// Ideally, the receipt of current block will be included in the next block, i.e., no
 		// missing receipts.
@@ -424,6 +428,35 @@ where
 			shuffle_extrinsics::<<Block as BlockT>::Extrinsic>(extrinsics, shuffling_seed);
 
 		Ok(extrinsics)
+	}
+
+	fn check_receipts_in_primary_block(
+		&self,
+		primary_number: NumberFor<PBlock>,
+	) -> Result<(), sp_blockchain::Error> {
+		let extrinsics = self
+			.primary_chain_client
+			.block_body(&BlockId::Number(primary_number))?
+			.ok_or_else(|| {
+				sp_blockchain::Error::Backend(format!(
+					"Primary block body for {:?} not found",
+					primary_number
+				))
+			})?;
+
+		let receipts = self
+			.primary_chain_client
+			.runtime_api()
+			.extract_receipts(&BlockId::Number(primary_number), extrinsics)?;
+
+		for _receipt in receipts {
+			// TODO:
+			// - Check if the receipt is valid.
+			// - If invalid, cache it and expect FP in next X blocks.
+			// - Remove it from cache if FP is found later.
+		}
+
+		Ok(())
 	}
 
 	fn try_sign_and_send_receipt(

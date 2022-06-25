@@ -443,6 +443,11 @@ sp_api::decl_runtime_apis! {
         /// Extract a fraud proof from given extrinsic if any.
         fn extract_fraud_proof(ext: &Block::Extrinsic) -> Option<FraudProof>;
 
+        /// Extract all the [`SignedExecutionReceipt`] from the given extrinsics.
+        fn extract_receipts(
+            extrinsics: Vec<Block::Extrinsic>,
+        ) -> Vec<SignedExecutionReceipt<NumberFor<Block>, Block::Hash, SecondaryHash>>;
+
         /// Generates a randomness seed for extrinsics shuffling.
         fn extrinsics_shuffling_seed(header: Block::Header) -> Randomness;
 
