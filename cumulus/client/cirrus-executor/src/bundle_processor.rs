@@ -1,4 +1,4 @@
-use crate::{ExecutionReceiptFor, SignedExecutionReceiptFor};
+use crate::{verification::ReceiptVerifier, ExecutionReceiptFor, SignedExecutionReceiptFor};
 use cirrus_block_builder::{BlockBuilder, BuiltBlock, RecordProof};
 use cirrus_primitives::{AccountId, SecondaryApi};
 use codec::{Decode, Encode};
@@ -449,11 +449,14 @@ where
 			.runtime_api()
 			.extract_receipts(&BlockId::Number(primary_number), extrinsics)?;
 
-		for _receipt in receipts {
-			// TODO:
-			// - Check if the receipt is valid.
-			// - If invalid, cache it and expect FP in next X blocks.
-			// - Remove it from cache if FP is found later.
+		let verifier = ReceiptVerifier::<Block, PBlock, _>::new(self.primary_chain_client.clone());
+
+		for receipt in receipts {
+			if verifier.verify(&receipt).is_err() {
+				// TODO:
+				// - Cache it and expect FP in next X blocks.
+				// - Remove it from cache if FP is found later.
+			}
 		}
 
 		Ok(())
