@@ -62,10 +62,14 @@ mod bundle_producer;
 mod merkle_tree;
 #[cfg(test)]
 mod tests;
+mod verification;
 mod worker;
 
 use crate::{
-	bundle_processor::BundleProcessor, bundle_producer::BundleProducer, worker::BlockInfo,
+	bundle_processor::BundleProcessor,
+	bundle_producer::BundleProducer,
+	verification::{ReceiptError, ReceiptVerifier},
+	worker::BlockInfo,
 };
 use cirrus_block_builder::{BlockBuilder, RecordProof};
 use cirrus_client_executor_gossip::{Action, GossipMessageHandler};
@@ -540,10 +544,8 @@ pub enum GossipMessageError {
 	BadBundleSignature,
 	#[error("Invalid bundle author, got: {got}, expected: {expected}")]
 	InvalidBundleAuthor { got: ExecutorId, expected: ExecutorId },
-	#[error("The signature of execution receipt is invalid")]
-	BadExecutionReceiptSignature,
-	#[error("Invalid execution receipt author, got: {got}, expected: {expected}")]
-	InvalidExecutionReceiptAuthor { got: ExecutorId, expected: ExecutorId },
+	#[error(transparent)]
+	Receipt(#[from] ReceiptError),
 }
 
 impl From<sp_blockchain::Error> for GossipMessageError {
@@ -662,25 +664,16 @@ where
 		&self,
 		signed_execution_receipt: &SignedExecutionReceiptFor<PBlock, Block::Hash>,
 	) -> Result<Action, Self::Error> {
-		let SignedExecutionReceipt { execution_receipt, signature, signer } =
-			signed_execution_receipt;
+		ReceiptVerifier::<Block, PBlock, _>::new(self.primary_chain_client.clone())
+			.verify(signed_execution_receipt)
+			.map_err(|e| {
+				if let ReceiptError::InvalidAuthor { .. } = e {
+					// TODO: handle the misbehavior.
+				}
+				e
+			})?;
 
-		if !signer.verify(&execution_receipt.hash(), signature) {
-			return Err(Self::Error::BadExecutionReceiptSignature)
-		}
-
-		let expected_executor_id = self
-			.primary_chain_client
-			.runtime_api()
-			.executor_id(&BlockId::Hash(execution_receipt.primary_hash))?;
-		if *signer != expected_executor_id {
-			// TODO: handle the misbehavior.
-
-			return Err(Self::Error::InvalidExecutionReceiptAuthor {
-				got: signer.clone(),
-				expected: expected_executor_id,
-			})
-		}
+		let SignedExecutionReceipt { execution_receipt, .. } = signed_execution_receipt;
 
 		let primary_number: BlockNumber = execution_receipt
 			.primary_number
