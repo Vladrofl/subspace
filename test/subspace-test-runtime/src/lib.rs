@@ -26,7 +26,7 @@ include!(concat!(env!("OUT_DIR"), "/execution_wasm_bundle.rs"));
 #[cfg(feature = "std")]
 include!(concat!(env!("OUT_DIR"), "/wasm_binary.rs"));
 
-use codec::{Compact, CompactLen, Decode, Encode};
+use codec::{Compact, CompactLen, Encode};
 use core::time::Duration;
 use frame_support::traits::{
     ConstU128, ConstU16, ConstU32, ConstU64, ConstU8, Currency, ExistenceRequirement, Get,
@@ -56,8 +56,7 @@ use sp_runtime::transaction_validity::{
     InvalidTransaction, TransactionSource, TransactionValidity, TransactionValidityError,
 };
 use sp_runtime::{
-    create_runtime_str, generic, AccountId32, ApplyExtrinsicResult, DispatchError, OpaqueExtrinsic,
-    Perbill,
+    create_runtime_str, generic, AccountId32, ApplyExtrinsicResult, DispatchError, Perbill,
 };
 use sp_std::borrow::Cow;
 use sp_std::iter::Peekable;
@@ -819,22 +818,17 @@ fn extract_block_object_mapping(block: Block, successful_calls: Vec<Hash>) -> Bl
     block_object_mapping
 }
 
-fn extract_bundles(extrinsics: Vec<OpaqueExtrinsic>) -> Vec<OpaqueBundle> {
+fn extract_bundles(extrinsics: Vec<UncheckedExtrinsic>) -> Vec<OpaqueBundle> {
     extrinsics
         .into_iter()
-        .filter_map(|opaque_extrinsic| {
-            match <UncheckedExtrinsic>::decode(&mut opaque_extrinsic.encode().as_slice()) {
-                Ok(uxt) => {
-                    if let Call::Executor(pallet_executor::Call::submit_transaction_bundle {
-                        signed_opaque_bundle,
-                    }) = uxt.function
-                    {
-                        Some(signed_opaque_bundle.opaque_bundle)
-                    } else {
-                        None
-                    }
-                }
-                Err(_) => None,
+        .filter_map(|uxt| {
+            if let Call::Executor(pallet_executor::Call::submit_transaction_bundle {
+                signed_opaque_bundle,
+            }) = uxt.function
+            {
+                Some(signed_opaque_bundle.opaque_bundle)
+            } else {
+                None
             }
         })
         .collect()
@@ -1098,7 +1092,7 @@ impl_runtime_apis! {
             Executor::submit_invalid_transaction_proof_unsigned(invalid_transaction_proof)
         }
 
-        fn extract_bundles(extrinsics: Vec<OpaqueExtrinsic>) -> Vec<OpaqueBundle> {
+        fn extract_bundles(extrinsics: Vec<<Block as BlockT>::Extrinsic>) -> Vec<OpaqueBundle> {
             extract_bundles(extrinsics)
         }
 

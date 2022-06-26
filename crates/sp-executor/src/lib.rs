@@ -438,15 +438,15 @@ sp_api::decl_runtime_apis! {
         );
 
         /// Extract the bundles from extrinsics in a block.
-        fn extract_bundles(extrinsics: Vec<OpaqueExtrinsic>) -> Vec<OpaqueBundle>;
-
-        /// Extract a fraud proof from given extrinsic if any.
-        fn extract_fraud_proof(ext: &Block::Extrinsic) -> Option<FraudProof>;
+        fn extract_bundles(extrinsics: Vec<Block::Extrinsic>) -> Vec<OpaqueBundle>;
 
         /// Extract all the [`SignedExecutionReceipt`] from the given extrinsics.
         fn extract_receipts(
             extrinsics: Vec<Block::Extrinsic>,
         ) -> Vec<SignedExecutionReceipt<NumberFor<Block>, Block::Hash, SecondaryHash>>;
+
+        /// Extract a fraud proof from given extrinsic if any.
+        fn extract_fraud_proof(ext: &Block::Extrinsic) -> Option<FraudProof>;
 
         /// Generates a randomness seed for extrinsics shuffling.
         fn extrinsics_shuffling_seed(header: Block::Header) -> Randomness;

@@ -36,7 +36,6 @@ pub use crate::feed_processor::FeedProcessorKind;
 use crate::fees::{OnChargeTransaction, TransactionByteFee};
 use crate::object_mapping::extract_block_object_mapping;
 use crate::signed_extensions::{CheckStorageAccess, DisablePallets};
-use codec::{Decode, Encode};
 use core::time::Duration;
 use frame_support::traits::{ConstU128, ConstU16, ConstU32, ConstU64, ConstU8, Contains, Get};
 use frame_support::weights::constants::{RocksDbWeight, WEIGHT_PER_SECOND};
@@ -56,9 +55,7 @@ use sp_core::OpaqueMetadata;
 use sp_executor::{FraudProof, OpaqueBundle, SignedExecutionReceipt};
 use sp_runtime::traits::{AccountIdLookup, BlakeTwo256, NumberFor, Zero};
 use sp_runtime::transaction_validity::{TransactionSource, TransactionValidity};
-use sp_runtime::{
-    create_runtime_str, generic, AccountId32, ApplyExtrinsicResult, OpaqueExtrinsic, Perbill,
-};
+use sp_runtime::{create_runtime_str, generic, AccountId32, ApplyExtrinsicResult, Perbill};
 use sp_std::borrow::Cow;
 use sp_std::prelude::*;
 #[cfg(feature = "std")]
@@ -525,22 +522,17 @@ fn extract_root_blocks(ext: &UncheckedExtrinsic) -> Option<Vec<RootBlock>> {
     }
 }
 
-fn extract_bundles(extrinsics: Vec<OpaqueExtrinsic>) -> Vec<OpaqueBundle> {
+fn extract_bundles(extrinsics: Vec<UncheckedExtrinsic>) -> Vec<OpaqueBundle> {
     extrinsics
         .into_iter()
-        .filter_map(|opaque_extrinsic| {
-            match <UncheckedExtrinsic>::decode(&mut opaque_extrinsic.encode().as_slice()) {
-                Ok(uxt) => {
-                    if let Call::Executor(pallet_executor::Call::submit_transaction_bundle {
-                        signed_opaque_bundle,
-                    }) = uxt.function
-                    {
-                        Some(signed_opaque_bundle.opaque_bundle)
-                    } else {
-                        None
-                    }
-                }
-                Err(_) => None,
+        .filter_map(|uxt| {
+            if let Call::Executor(pallet_executor::Call::submit_transaction_bundle {
+                signed_opaque_bundle,
+            }) = uxt.function
+            {
+                Some(signed_opaque_bundle.opaque_bundle)
+            } else {
+                None
             }
         })
         .collect()
@@ -804,7 +796,7 @@ impl_runtime_apis! {
             Executor::submit_invalid_transaction_proof_unsigned(invalid_transaction_proof)
         }
 
-        fn extract_bundles(extrinsics: Vec<OpaqueExtrinsic>) -> Vec<OpaqueBundle> {
+        fn extract_bundles(extrinsics: Vec<<Block as BlockT>::Extrinsic>) -> Vec<OpaqueBundle> {
             extract_bundles(extrinsics)
         }
 
