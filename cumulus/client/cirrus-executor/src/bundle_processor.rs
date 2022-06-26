@@ -1,4 +1,6 @@
-use crate::{verification::ReceiptVerifier, ExecutionReceiptFor, SignedExecutionReceiptFor};
+use crate::{
+	aux_schema, verification::ReceiptVerifier, ExecutionReceiptFor, SignedExecutionReceiptFor,
+};
 use cirrus_block_builder::{BlockBuilder, BuiltBlock, RecordProof};
 use cirrus_primitives::{AccountId, SecondaryApi};
 use codec::{Decode, Encode};
@@ -452,8 +454,30 @@ where
 		let verifier = ReceiptVerifier::<Block, PBlock, _>::new(self.primary_chain_client.clone());
 
 		for receipt in receipts {
-			if verifier.verify(&receipt).is_err() {
-				// TODO: Cache it and expect FP in next X blocks.
+			// TODO: Is it necessary here?
+			// This has been verified in pallet-executor.
+			assert!(verifier.verify(&receipt).is_ok());
+
+			// TODO: Cache it and expect FP in next X blocks.
+			// invalid_receipt:
+			match aux_schema::load_execution_receipt::<_, _, NumberFor<Block>, PBlock::Hash>(
+				&*self.client,
+				receipt.execution_receipt.secondary_hash,
+			)? {
+				Some(local_receipt) => {
+					// TODO: compare the receipt with local_receipt
+					let mismatch_local_receipt = true;
+					if mismatch_local_receipt {
+						// TODO: Note invalid receipt
+					}
+				},
+				None => {
+					// There is a chance that an invalid receipt 
+					// Primary number to secondary number => load receipt
+					// retrieve the local receipt at block #primary_number
+
+					// TODO: Note invalid receipt
+				},
 			}
 		}
 

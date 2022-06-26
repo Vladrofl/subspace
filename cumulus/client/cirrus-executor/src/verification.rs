@@ -31,6 +31,7 @@ where
 		Self { primary_chain_client, _phantom: Default::default() }
 	}
 
+	/// Verifies the signature and author of given receipt.
 	pub(super) fn verify(
 		&self,
 		signed_execution_receipt: &SignedExecutionReceiptFor<PBlock, Block::Hash>,
