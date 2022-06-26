@@ -852,6 +852,21 @@ fn extract_receipts(
         .collect()
 }
 
+fn extract_fraud_proofs(extrinsics: Vec<UncheckedExtrinsic>) -> Vec<FraudProof> {
+    extrinsics
+        .into_iter()
+        .filter_map(|uxt| {
+            if let Call::Executor(pallet_executor::Call::submit_fraud_proof { fraud_proof }) =
+                uxt.function
+            {
+                Some(fraud_proof)
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
 fn extract_fraud_proof(ext: &UncheckedExtrinsic) -> Option<sp_executor::FraudProof> {
     match &ext.function {
         Call::Executor(pallet_executor::Call::submit_fraud_proof { fraud_proof }) => {
@@ -1100,6 +1115,10 @@ impl_runtime_apis! {
             extrinsics: Vec<<Block as BlockT>::Extrinsic>,
         ) -> Vec<sp_executor::SignedExecutionReceipt<NumberFor<Block>, <Block as BlockT>::Hash, cirrus_primitives::Hash>> {
             extract_receipts(extrinsics)
+        }
+
+        fn extract_fraud_proofs(extrinsics: Vec<<Block as BlockT>::Extrinsic>) -> Vec<FraudProof> {
+            extract_fraud_proofs(extrinsics)
         }
 
         fn extract_fraud_proof(ext: &<Block as BlockT>::Extrinsic) -> Option<sp_executor::FraudProof> {

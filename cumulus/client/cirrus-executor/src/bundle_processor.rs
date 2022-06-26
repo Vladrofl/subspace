@@ -447,16 +447,23 @@ where
 		let receipts = self
 			.primary_chain_client
 			.runtime_api()
-			.extract_receipts(&BlockId::Number(primary_number), extrinsics)?;
+			.extract_receipts(&BlockId::Number(primary_number), extrinsics.clone())?;
 
 		let verifier = ReceiptVerifier::<Block, PBlock, _>::new(self.primary_chain_client.clone());
 
 		for receipt in receipts {
 			if verifier.verify(&receipt).is_err() {
-				// TODO:
-				// - Cache it and expect FP in next X blocks.
-				// - Remove it from cache if FP is found later.
+				// TODO: Cache it and expect FP in next X blocks.
 			}
+		}
+
+		let fraud_proofs = self
+			.primary_chain_client
+			.runtime_api()
+			.extract_fraud_proofs(&BlockId::Number(primary_number), extrinsics)?;
+
+		for _fraud_proof in fraud_proofs {
+			// TODO: Remove the corresponding invalid receipt entry from cache.
 		}
 
 		Ok(())

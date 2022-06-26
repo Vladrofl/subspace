@@ -445,6 +445,9 @@ sp_api::decl_runtime_apis! {
             extrinsics: Vec<Block::Extrinsic>,
         ) -> Vec<SignedExecutionReceipt<NumberFor<Block>, Block::Hash, SecondaryHash>>;
 
+        /// Extract all the fraud proofs from the given extrinsics.
+        fn extract_fraud_proofs(extrinsics: Vec<Block::Extrinsic>) -> Vec<FraudProof>;
+
         /// Extract a fraud proof from given extrinsic if any.
         fn extract_fraud_proof(ext: &Block::Extrinsic) -> Option<FraudProof>;
 

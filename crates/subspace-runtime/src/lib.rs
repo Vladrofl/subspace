@@ -556,7 +556,22 @@ fn extract_receipts(
         .collect()
 }
 
-fn extract_fraud_proof(ext: &UncheckedExtrinsic) -> Option<sp_executor::FraudProof> {
+fn extract_fraud_proofs(extrinsics: Vec<UncheckedExtrinsic>) -> Vec<FraudProof> {
+    extrinsics
+        .into_iter()
+        .filter_map(|uxt| {
+            if let Call::Executor(pallet_executor::Call::submit_fraud_proof { fraud_proof }) =
+                uxt.function
+            {
+                Some(fraud_proof)
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+fn extract_fraud_proof(ext: &UncheckedExtrinsic) -> Option<FraudProof> {
     match &ext.function {
         Call::Executor(pallet_executor::Call::submit_fraud_proof { fraud_proof }) => {
             Some(fraud_proof.clone())
@@ -806,12 +821,16 @@ impl_runtime_apis! {
             extract_receipts(extrinsics)
         }
 
-        fn extrinsics_shuffling_seed(header: <Block as BlockT>::Header) -> Randomness {
-            extrinsics_shuffling_seed::<Block>(header)
+        fn extract_fraud_proofs(extrinsics: Vec<<Block as BlockT>::Extrinsic>) -> Vec<FraudProof> {
+            extract_fraud_proofs(extrinsics)
         }
 
-        fn extract_fraud_proof(ext: &<Block as BlockT>::Extrinsic) -> Option<sp_executor::FraudProof> {
+        fn extract_fraud_proof(ext: &<Block as BlockT>::Extrinsic) -> Option<FraudProof> {
             extract_fraud_proof(ext)
+        }
+
+        fn extrinsics_shuffling_seed(header: <Block as BlockT>::Header) -> Randomness {
+            extrinsics_shuffling_seed::<Block>(header)
         }
 
         fn execution_wasm_bundle() -> Cow<'static, [u8]> {
