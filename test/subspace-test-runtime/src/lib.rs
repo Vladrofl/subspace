@@ -48,7 +48,7 @@ use sp_consensus_subspace::{
 };
 use sp_core::crypto::{ByteArray, KeyTypeId};
 use sp_core::{Hasher, OpaqueMetadata};
-use sp_executor::{FraudProof, OpaqueBundle};
+use sp_executor::{FraudProof, OpaqueBundle, SignedExecutionReceipt};
 use sp_runtime::traits::{
     AccountIdLookup, BlakeTwo256, DispatchInfoOf, NumberFor, PostDispatchInfoOf, Zero,
 };
@@ -836,7 +836,7 @@ fn extract_bundles(extrinsics: Vec<UncheckedExtrinsic>) -> Vec<OpaqueBundle> {
 
 fn extract_receipts(
     extrinsics: Vec<UncheckedExtrinsic>,
-) -> Vec<sp_executor::SignedExecutionReceipt<BlockNumber, Hash, cirrus_primitives::Hash>> {
+) -> Vec<SignedExecutionReceipt<BlockNumber, Hash, cirrus_primitives::Hash>> {
     extrinsics
         .into_iter()
         .filter_map(|uxt| {
@@ -1082,7 +1082,7 @@ impl_runtime_apis! {
 
     impl sp_executor::ExecutorApi<Block, cirrus_primitives::Hash> for Runtime {
         fn submit_execution_receipt_unsigned(
-            execution_receipt: sp_executor::SignedExecutionReceipt<NumberFor<Block>, <Block as BlockT>::Hash, cirrus_primitives::Hash>,
+            execution_receipt: SignedExecutionReceipt<NumberFor<Block>, <Block as BlockT>::Hash, cirrus_primitives::Hash>,
         ) {
             Executor::submit_execution_receipt_unsigned(execution_receipt)
         }
@@ -1113,7 +1113,7 @@ impl_runtime_apis! {
 
         fn extract_receipts(
             extrinsics: Vec<<Block as BlockT>::Extrinsic>,
-        ) -> Vec<sp_executor::SignedExecutionReceipt<NumberFor<Block>, <Block as BlockT>::Hash, cirrus_primitives::Hash>> {
+        ) -> Vec<SignedExecutionReceipt<NumberFor<Block>, <Block as BlockT>::Hash, cirrus_primitives::Hash>> {
             extract_receipts(extrinsics)
         }
 
