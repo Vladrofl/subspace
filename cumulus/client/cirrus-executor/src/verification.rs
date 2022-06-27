@@ -1,6 +1,6 @@
 use super::SignedExecutionReceiptFor;
 use sp_api::ProvideRuntimeApi;
-use sp_executor::{ExecutorApi, ExecutorId, SignedExecutionReceipt};
+use sp_executor::{ExecutionReceipt, ExecutorApi, ExecutorId, SignedExecutionReceipt};
 use sp_runtime::{generic::BlockId, traits::Block as BlockT, RuntimeAppPublic};
 use std::{marker::PhantomData, sync::Arc};
 
@@ -56,4 +56,21 @@ where
 
 		Ok(())
 	}
+}
+
+/// Compares if the receipt `other` is the same with `local`, return a tuple of (local_index,
+/// local_trace_root) if there is a mismatch.
+pub(super) fn find_trace_mismatch<Number, Hash: Copy + Eq, PNumber, PHash>(
+	local: &ExecutionReceipt<Number, PHash, Hash>,
+	other: &ExecutionReceipt<PNumber, PHash, Hash>,
+) -> Option<(usize, Hash)> {
+	local.trace.iter().enumerate().zip(other.trace.iter().enumerate()).find_map(
+		|((local_idx, local_root), (_, other_root))| {
+			if local_root != other_root {
+				Some((local_idx, *local_root))
+			} else {
+				None
+			}
+		},
+	)
 }

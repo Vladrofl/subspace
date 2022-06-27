@@ -1,6 +1,4 @@
-use crate::{
-	aux_schema, verification::ReceiptVerifier, ExecutionReceiptFor, SignedExecutionReceiptFor,
-};
+use crate::{aux_schema, ExecutionReceiptFor, SignedExecutionReceiptFor};
 use cirrus_block_builder::{BlockBuilder, BuiltBlock, RecordProof};
 use cirrus_primitives::{AccountId, SecondaryApi};
 use codec::{Decode, Encode};
@@ -451,32 +449,29 @@ where
 			.runtime_api()
 			.extract_receipts(&BlockId::Number(primary_number), extrinsics.clone())?;
 
-		let verifier = ReceiptVerifier::<Block, PBlock, _>::new(self.primary_chain_client.clone());
-
-		for receipt in receipts {
-			// TODO: Is it necessary here?
-			// This has been verified in pallet-executor.
-			assert!(verifier.verify(&receipt).is_ok());
-
-			// TODO: Cache it and expect FP in next X blocks.
-			// invalid_receipt:
-			match aux_schema::load_execution_receipt::<_, _, NumberFor<Block>, PBlock::Hash>(
-				&*self.client,
-				receipt.execution_receipt.secondary_hash,
-			)? {
+		for receipt in receipts.iter() {
+			match aux_schema::load_execution_receipt::<
+				_,
+				Block::Hash,
+				NumberFor<Block>,
+				PBlock::Hash,
+			>(&*self.client, receipt.execution_receipt.secondary_hash)?
+			{
 				Some(local_receipt) => {
-					// TODO: compare the receipt with local_receipt
-					let mismatch_local_receipt = true;
-					if mismatch_local_receipt {
-						// TODO: Note invalid receipt
+					if crate::verification::find_trace_mismatch(
+						&local_receipt,
+						&receipt.execution_receipt,
+					)
+					.is_some()
+					{
+						// TODO: An invalid receipt, add it to cache and expect FP in next X blocks.
 					}
 				},
 				None => {
-					// There is a chance that an invalid receipt 
-					// Primary number to secondary number => load receipt
-					// retrieve the local receipt at block #primary_number
+					// The receipt of a prior block must exist, otherwise it means the receipt included
+					// on the primary chain points to an invalid secondary block.
 
-					// TODO: Note invalid receipt
+					// TODO: An invalid receipt, add it to cache and expect FP in next X blocks.
 				},
 			}
 		}
