@@ -3,6 +3,7 @@
 use codec::{Decode, Encode};
 use sc_client_api::backend::AuxStore;
 use sp_blockchain::{Error as ClientError, Result as ClientResult};
+use sp_core::H256;
 use sp_executor::ExecutionReceipt;
 use sp_runtime::traits::{Block as BlockT, NumberFor, One, SaturatedConversion};
 use subspace_core_primitives::BlockNumber;
@@ -10,11 +11,17 @@ use subspace_core_primitives::BlockNumber;
 const EXECUTION_RECEIPT_KEY: &[u8] = b"execution_receipt";
 const EXECUTION_RECEIPT_START: &[u8] = b"execution_receipt_start";
 const EXECUTION_RECEIPT_BLOCK_NUMBER: &[u8] = b"execution_receipt_block_number";
+const INVALID_RECEIPT_KEY: &[u8] = b"invalid_receipt";
+const INVALID_RECEIPT_BLOCK_NUMBER: &[u8] = b"invalid_receipt_block_number";
 /// Prune the execution receipts when they reach this number.
 const PRUNING_DEPTH: BlockNumber = 1000;
 
 fn execution_receipt_key(block_hash: impl Encode) -> Vec<u8> {
 	(EXECUTION_RECEIPT_KEY, block_hash).encode()
+}
+
+fn invalid_receipt_key(signed_receipt_hash: impl Encode) -> Vec<u8> {
+	(INVALID_RECEIPT_KEY, signed_receipt_hash).encode()
 }
 
 fn load_decode<Backend: AuxStore, T: Decode>(
@@ -101,6 +108,32 @@ pub(super) fn target_receipt_is_pruned(
 	target_block: BlockNumber,
 ) -> bool {
 	best_execution_chain_number.saturating_sub(target_block) >= PRUNING_DEPTH
+}
+
+// Use `signed_receipt_hash` as key to avoid the potential collision that two dishonest
+// executors produced a same invalid ER even it's very unlikely.
+pub(super) fn write_invalid_receipt<Backend: AuxStore, Block: BlockT, PBlock: BlockT>(
+	backend: &Backend,
+	signed_receipt_hash: H256,
+	invalid_receipt: &ExecutionReceipt<NumberFor<PBlock>, PBlock::Hash, Block::Hash>,
+) -> Result<(), sp_blockchain::Error> {
+	let block_number = invalid_receipt.primary_number;
+
+	let block_number_key = (INVALID_RECEIPT_BLOCK_NUMBER, block_number).encode();
+	let mut hashes_at_block_number =
+		load_decode::<_, Vec<H256>>(backend, block_number_key.as_slice())?.unwrap_or_default();
+	hashes_at_block_number.push(signed_receipt_hash);
+
+	backend.insert_aux(
+		&[
+			(
+				invalid_receipt_key(signed_receipt_hash).as_slice(),
+				invalid_receipt.encode().as_slice(),
+			),
+			(block_number_key.as_slice(), hashes_at_block_number.encode().as_slice()),
+		],
+		vec![],
+	)
 }
 
 #[cfg(test)]
