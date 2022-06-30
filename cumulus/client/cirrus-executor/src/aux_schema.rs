@@ -136,6 +136,33 @@ pub(super) fn write_invalid_receipt<Backend: AuxStore, Block: BlockT, PBlock: Bl
 	)
 }
 
+pub(super) fn delete_invalid_receipt<Backend: AuxStore, Number: Encode>(
+	backend: &Backend,
+	block_number: Number,
+	signed_receipt_hash: H256,
+) -> Result<(), sp_blockchain::Error> {
+	let block_number_key = (INVALID_RECEIPT_BLOCK_NUMBER, block_number).encode();
+	let hashes_at_block_number =
+		load_decode::<_, Vec<H256>>(backend, block_number_key.as_slice())?.unwrap_or_default();
+	let new_hashes = hashes_at_block_number
+		.into_iter()
+		.filter(|&x| x != signed_receipt_hash)
+		.collect::<Vec<_>>();
+
+	let mut keys_to_delete = vec![invalid_receipt_key(signed_receipt_hash)];
+
+	if new_hashes.is_empty() {
+		keys_to_delete.push(block_number_key);
+
+		backend.insert_aux(&[], &keys_to_delete.iter().map(|k| &k[..]).collect::<Vec<&[u8]>>()[..])
+	} else {
+		backend.insert_aux(
+			&[(block_number_key.as_slice(), new_hashes.encode().as_slice())],
+			&keys_to_delete.iter().map(|k| &k[..]).collect::<Vec<&[u8]>>()[..],
+		)
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;

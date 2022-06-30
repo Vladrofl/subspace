@@ -493,8 +493,13 @@ where
 			.runtime_api()
 			.extract_fraud_proofs(&BlockId::Hash(primary_hash), extrinsics)?;
 
-		for _fraud_proof in fraud_proofs {
-			// TODO: Remove the corresponding invalid receipt entry from cache.
+		for fraud_proof in fraud_proofs {
+			let block_number = fraud_proof.parent_number + 1;
+			crate::aux_schema::delete_invalid_receipt(
+				&*self.client,
+				block_number,
+				fraud_proof.signed_receipt_hash,
+			)?;
 		}
 
 		Ok(())
