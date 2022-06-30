@@ -113,7 +113,7 @@ pub(super) fn target_receipt_is_pruned(
 
 // Use `signed_receipt_hash` as key to avoid the potential collision that two dishonest
 // executors produced a same invalid ER even it's very unlikely.
-pub(super) fn write_invalid_receipt<Backend: AuxStore, Block: BlockT, PBlock: BlockT>(
+pub(super) fn write_bad_receipt<Backend: AuxStore, Block: BlockT, PBlock: BlockT>(
 	backend: &Backend,
 	bad_signed_receipt_hash: H256,
 	bad_receipt: &ExecutionReceipt<NumberFor<PBlock>, PBlock::Hash, Block::Hash>,
@@ -162,7 +162,7 @@ pub(super) fn delete_bad_receipt<Backend: AuxStore>(
 
 	let mut keys_to_delete = vec![bad_receipt_key(signed_receipt_hash)];
 
-	if new_hashes.is_empty() {
+	let to_insert = if new_hashes.is_empty() {
 		keys_to_delete.push(block_number_key);
 
 		let bad_receipt_block_number_set = load_decode::<_, Vec<BlockNumber>>(
@@ -175,23 +175,20 @@ pub(super) fn delete_bad_receipt<Backend: AuxStore>(
 			.map(|x| x != block_number)
 			.collect::<Vec<_>>();
 
-		let to_insert = if new_bad_receipt_block_number_set.is_empty() {
+		if new_bad_receipt_block_number_set.is_empty() {
 			keys_to_delete.push(BAD_RECEIPT_BLOCK_NUMBER_SET.encode());
 			vec![]
 		} else {
 			vec![(BAD_RECEIPT_BLOCK_NUMBER_SET.encode(), new_bad_receipt_block_number_set.encode())]
-		};
-
-		backend.insert_aux(
-			&to_insert.iter().map(|(k, v)| (&k[..], &v[..])).collect::<Vec<_>>()[..],
-			&keys_to_delete.iter().map(|k| &k[..]).collect::<Vec<&[u8]>>()[..],
-		)
+		}
 	} else {
-		backend.insert_aux(
-			&[(block_number_key.as_slice(), new_hashes.encode().as_slice())],
-			&keys_to_delete.iter().map(|k| &k[..]).collect::<Vec<&[u8]>>()[..],
-		)
-	}
+		vec![(block_number_key, new_hashes.encode())]
+	};
+
+	backend.insert_aux(
+		&to_insert.iter().map(|(k, v)| (&k[..], &v[..])).collect::<Vec<_>>()[..],
+		&keys_to_delete.iter().map(|k| &k[..]).collect::<Vec<_>>()[..],
+	)
 }
 
 #[cfg(test)]

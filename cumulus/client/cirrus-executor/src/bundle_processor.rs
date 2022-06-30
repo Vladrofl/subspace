@@ -484,7 +484,7 @@ where
 					if crate::find_trace_mismatch(&local_receipt, &signed_receipt.execution_receipt)
 						.is_some()
 					{
-						crate::aux_schema::write_invalid_receipt::<_, Block, PBlock>(
+						crate::aux_schema::write_bad_receipt::<_, Block, PBlock>(
 							&*self.client,
 							signed_receipt.hash(),
 							&signed_receipt.execution_receipt,
@@ -494,7 +494,7 @@ where
 				None => {
 					// The receipt of a prior block must exist, otherwise it means the receipt included
 					// on the primary chain points to an invalid secondary block.
-					crate::aux_schema::write_invalid_receipt::<_, Block, PBlock>(
+					crate::aux_schema::write_bad_receipt::<_, Block, PBlock>(
 						&*self.client,
 						signed_receipt.hash(),
 						&signed_receipt.execution_receipt,
