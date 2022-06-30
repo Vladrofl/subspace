@@ -24,6 +24,7 @@ use sp_api::{ApiError, BlockT, ProvideRuntimeApi, TransactionFor};
 use sp_block_builder::BlockBuilder;
 use sp_blockchain::HeaderBackend;
 use sp_consensus_slots::Slot;
+use sp_core::traits::CodeExecutor;
 use sp_executor::{ExecutorApi, OpaqueBundle, SignedOpaqueBundle};
 use sp_runtime::{
 	generic::{BlockId, DigestItem},
@@ -80,11 +81,12 @@ pub(super) async fn start_worker<
 	Backend,
 	IBNS,
 	NSNS,
+	E,
 >(
 	primary_chain_client: Arc<PClient>,
 	client: Arc<Client>,
 	bundle_producer: BundleProducer<Block, PBlock, Client, PClient, TransactionPool>,
-	bundle_processor: BundleProcessor<Block, PBlock, Client, PClient, Backend>,
+	bundle_processor: BundleProcessor<Block, PBlock, Client, PClient, Backend, E>,
 	imported_block_notification_stream: IBNS,
 	new_slot_notification_stream: NSNS,
 	active_leaves: Vec<BlockInfo<PBlock>>,
@@ -110,6 +112,7 @@ pub(super) async fn start_worker<
 	Backend: sc_client_api::Backend<Block> + 'static,
 	IBNS: Stream<Item = NumberFor<PBlock>> + Send + 'static,
 	NSNS: Stream<Item = (Slot, Sha256Hash)> + Send + 'static,
+	E: CodeExecutor,
 {
 	let span = tracing::Span::current();
 

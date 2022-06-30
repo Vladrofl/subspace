@@ -113,7 +113,7 @@ where
 	transaction_pool: Arc<TransactionPool>,
 	backend: Arc<Backend>,
 	fraud_proof_generator: FraudProofGenerator<Block, Client, Backend, E>,
-	bundle_processor: BundleProcessor<Block, PBlock, Client, PClient, Backend>,
+	bundle_processor: BundleProcessor<Block, PBlock, Client, PClient, Backend, E>,
 }
 
 impl<Block, PBlock, Client, PClient, TransactionPool, Backend, E> Clone
@@ -229,6 +229,8 @@ where
 			backend.clone(),
 			is_authority,
 			keystore,
+			spawner.clone(),
+			fraud_proof_generator.clone(),
 		);
 
 		spawn_essential.spawn_essential_blocking(

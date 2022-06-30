@@ -353,7 +353,7 @@ pub enum VerificationError {
 #[derive(Debug, Decode, Encode, TypeInfo, PartialEq, Eq, Clone)]
 pub struct FraudProof {
     /// Hash of the signed execution receipt in which an invalid state transition occurred.
-    pub signed_receipt_hash: H256,
+    pub bad_signed_receipt_hash: H256,
     /// Parent number.
     pub parent_number: BlockNumber,
     /// Parent hash of the block at which the invalid execution occurred.

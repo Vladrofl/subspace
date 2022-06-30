@@ -1,7 +1,10 @@
-use crate::{aux_schema, ExecutionReceiptFor, SignedExecutionReceiptFor};
+use crate::{
+	aux_schema, fraud_proof::FraudProofGenerator, ExecutionReceiptFor, SignedExecutionReceiptFor,
+};
 use cirrus_block_builder::{BlockBuilder, BuiltBlock, RecordProof};
 use cirrus_primitives::{AccountId, SecondaryApi};
 use codec::{Decode, Encode};
+use futures::FutureExt;
 use rand::{seq::SliceRandom, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 use sc_client_api::{AuxStore, BlockBackend};
@@ -13,9 +16,12 @@ use sc_utils::mpsc::TracingUnboundedSender;
 use sp_api::{ApiExt, NumberFor, ProvideRuntimeApi, TransactionFor};
 use sp_blockchain::HeaderBackend;
 use sp_consensus::BlockOrigin;
-use sp_core::ByteArray;
+use sp_core::{
+	traits::{CodeExecutor, SpawnNamed},
+	ByteArray,
+};
 use sp_executor::{
-	ExecutionReceipt, ExecutorApi, ExecutorId, ExecutorSignature, OpaqueBundle,
+	ExecutionReceipt, ExecutorApi, ExecutorId, ExecutorSignature, FraudProof, OpaqueBundle,
 	SignedExecutionReceipt,
 };
 use sp_keystore::{SyncCryptoStore, SyncCryptoStorePtr};
@@ -78,7 +84,7 @@ fn shuffle_extrinsics<Extrinsic: Debug>(
 	shuffled_extrinsics
 }
 
-pub(crate) struct BundleProcessor<Block, PBlock, Client, PClient, Backend>
+pub(crate) struct BundleProcessor<Block, PBlock, Client, PClient, Backend, E>
 where
 	Block: BlockT,
 	PBlock: BlockT,
@@ -91,11 +97,13 @@ where
 	backend: Arc<Backend>,
 	is_authority: bool,
 	keystore: SyncCryptoStorePtr,
+	spawner: Box<dyn SpawnNamed + Send + Sync>,
+	fraud_proof_generator: FraudProofGenerator<Block, Client, Backend, E>,
 	_phantom_data: PhantomData<PBlock>,
 }
 
-impl<Block, PBlock, Client, PClient, Backend> Clone
-	for BundleProcessor<Block, PBlock, Client, PClient, Backend>
+impl<Block, PBlock, Client, PClient, Backend, E> Clone
+	for BundleProcessor<Block, PBlock, Client, PClient, Backend, E>
 where
 	Block: BlockT,
 	PBlock: BlockT,
@@ -109,13 +117,15 @@ where
 			backend: self.backend.clone(),
 			is_authority: self.is_authority,
 			keystore: self.keystore.clone(),
+			spawner: self.spawner.clone(),
+			fraud_proof_generator: self.fraud_proof_generator.clone(),
 			_phantom_data: self._phantom_data,
 		}
 	}
 }
 
-impl<Block, PBlock, Client, PClient, Backend>
-	BundleProcessor<Block, PBlock, Client, PClient, Backend>
+impl<Block, PBlock, Client, PClient, Backend, E>
+	BundleProcessor<Block, PBlock, Client, PClient, Backend, E>
 where
 	Block: BlockT,
 	PBlock: BlockT,
@@ -131,9 +141,10 @@ where
 		Transaction = TransactionFor<Client, Block>,
 		Error = sp_consensus::Error,
 	>,
-	PClient: HeaderBackend<PBlock> + BlockBackend<PBlock> + ProvideRuntimeApi<PBlock>,
+	PClient: HeaderBackend<PBlock> + BlockBackend<PBlock> + ProvideRuntimeApi<PBlock> + 'static,
 	PClient::Api: ExecutorApi<PBlock, Block::Hash>,
 	Backend: sc_client_api::Backend<Block>,
+	E: CodeExecutor,
 {
 	pub(crate) fn new(
 		primary_chain_client: Arc<PClient>,
@@ -145,6 +156,8 @@ where
 		backend: Arc<Backend>,
 		is_authority: bool,
 		keystore: SyncCryptoStorePtr,
+		spawner: Box<dyn SpawnNamed + Send + Sync>,
+		fraud_proof_generator: FraudProofGenerator<Block, Client, Backend, E>,
 	) -> Self {
 		Self {
 			primary_chain_client,
@@ -154,6 +167,8 @@ where
 			backend,
 			is_authority,
 			keystore,
+			spawner,
+			fraud_proof_generator,
 			_phantom_data: PhantomData::default(),
 		}
 	}
@@ -495,10 +510,10 @@ where
 
 		for fraud_proof in fraud_proofs {
 			let block_number = fraud_proof.parent_number + 1;
-			crate::aux_schema::delete_invalid_receipt(
+			crate::aux_schema::delete_bad_receipt(
 				&*self.client,
 				block_number,
-				fraud_proof.signed_receipt_hash,
+				fraud_proof.bad_signed_receipt_hash,
 			)?;
 		}
 
