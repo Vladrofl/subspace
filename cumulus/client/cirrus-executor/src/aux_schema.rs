@@ -191,6 +191,42 @@ pub(super) fn delete_bad_receipt<Backend: AuxStore>(
 	)
 }
 
+pub(super) fn load_first_bad_receipt_info<Backend: AuxStore, Block: BlockT, PBlock: BlockT>(
+	backend: &Backend,
+) -> Result<
+	Option<(
+		NumberFor<PBlock>,
+		H256,
+		ExecutionReceipt<NumberFor<PBlock>, PBlock::Hash, Block::Hash>,
+	)>,
+	sp_blockchain::Error,
+> {
+	let bad_receipt_block_number_set = load_decode::<_, Vec<NumberFor<PBlock>>>(
+		backend,
+		BAD_RECEIPT_BLOCK_NUMBER_SET.encode().as_slice(),
+	)?
+	.unwrap_or_default();
+
+	// bad_receipt_block_number_set is sorted already.
+	if let Some(bad_receipt_number) = bad_receipt_block_number_set.get(0).copied() {
+		let block_number_key = (BAD_RECEIPT_BLOCK_NUMBER, bad_receipt_number).encode();
+		let bad_signed_receipt_hashes =
+			load_decode::<_, Vec<H256>>(backend, block_number_key.as_slice())?.unwrap_or_default();
+
+		let bad_signed_receipt_hash = bad_signed_receipt_hashes[0].clone();
+
+		let first_bad_receipt = load_decode::<
+			_,
+			ExecutionReceipt<NumberFor<PBlock>, PBlock::Hash, Block::Hash>,
+		>(backend, bad_signed_receipt_hash.encode().as_slice())?
+		.expect("Bad receipt must exist; qed");
+
+		Ok(Some((bad_receipt_number, bad_signed_receipt_hash, first_bad_receipt)))
+	} else {
+		Ok(None)
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;

@@ -14,13 +14,13 @@
 // You should have received a copy of the GNU General Public License
 // along with Polkadot.  If not, see <http://www.gnu.org/licenses/>.
 
-use crate::{BundleProcessor, BundleProducer};
+use crate::{BundleProcessor, BundleProducer, TransactionFor};
 use cirrus_primitives::{AccountId, SecondaryApi};
 use codec::{Decode, Encode};
 use futures::{future, FutureExt, Stream, StreamExt, TryFutureExt};
 use sc_client_api::{AuxStore, BlockBackend};
 use sc_consensus::BlockImport;
-use sp_api::{ApiError, BlockT, ProvideRuntimeApi, TransactionFor};
+use sp_api::{ApiError, BlockT, ProvideRuntimeApi};
 use sp_block_builder::BlockBuilder;
 use sp_blockchain::HeaderBackend;
 use sp_consensus_slots::Slot;
@@ -28,7 +28,7 @@ use sp_core::traits::CodeExecutor;
 use sp_executor::{ExecutorApi, OpaqueBundle, SignedOpaqueBundle};
 use sp_runtime::{
 	generic::{BlockId, DigestItem},
-	traits::{Header as HeaderT, NumberFor, One, Saturating},
+	traits::{HashFor, Header as HeaderT, NumberFor, One, Saturating},
 };
 use std::{
 	borrow::Cow,
@@ -103,7 +103,7 @@ pub(super) async fn start_worker<
 		>,
 	for<'b> &'b Client: BlockImport<
 		Block,
-		Transaction = TransactionFor<Client, Block>,
+		Transaction = sp_api::TransactionFor<Client, Block>,
 		Error = sp_consensus::Error,
 	>,
 	PClient: HeaderBackend<PBlock> + BlockBackend<PBlock> + ProvideRuntimeApi<PBlock> + 'static,
@@ -112,6 +112,7 @@ pub(super) async fn start_worker<
 	Backend: sc_client_api::Backend<Block> + 'static,
 	IBNS: Stream<Item = NumberFor<PBlock>> + Send + 'static,
 	NSNS: Stream<Item = (Slot, Sha256Hash)> + Send + 'static,
+	TransactionFor<Backend, Block>: sp_trie::HashDBT<HashFor<Block>, sp_trie::DBValue>,
 	E: CodeExecutor,
 {
 	let span = tracing::Span::current();

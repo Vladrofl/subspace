@@ -1,5 +1,6 @@
 use crate::{
 	aux_schema, fraud_proof::FraudProofGenerator, ExecutionReceiptFor, SignedExecutionReceiptFor,
+	TransactionFor,
 };
 use cirrus_block_builder::{BlockBuilder, BuiltBlock, RecordProof};
 use cirrus_primitives::{AccountId, SecondaryApi};
@@ -13,7 +14,7 @@ use sc_consensus::{
 };
 use sc_network::NetworkService;
 use sc_utils::mpsc::TracingUnboundedSender;
-use sp_api::{ApiExt, NumberFor, ProvideRuntimeApi, TransactionFor};
+use sp_api::{ApiExt, NumberFor, ProvideRuntimeApi};
 use sp_blockchain::HeaderBackend;
 use sp_consensus::BlockOrigin;
 use sp_core::{
@@ -27,7 +28,7 @@ use sp_executor::{
 use sp_keystore::{SyncCryptoStore, SyncCryptoStorePtr};
 use sp_runtime::{
 	generic::BlockId,
-	traits::{Block as BlockT, Header as HeaderT, One},
+	traits::{Block as BlockT, HashFor, Header as HeaderT, One},
 	RuntimeAppPublic,
 };
 use std::{
@@ -129,7 +130,8 @@ impl<Block, PBlock, Client, PClient, Backend, E>
 where
 	Block: BlockT,
 	PBlock: BlockT,
-	Client: HeaderBackend<Block> + BlockBackend<Block> + AuxStore + ProvideRuntimeApi<Block>,
+	Client:
+		HeaderBackend<Block> + BlockBackend<Block> + AuxStore + ProvideRuntimeApi<Block> + 'static,
 	Client::Api: SecondaryApi<Block, AccountId>
 		+ sp_block_builder::BlockBuilder<Block>
 		+ sp_api::ApiExt<
@@ -138,12 +140,13 @@ where
 		>,
 	for<'b> &'b Client: BlockImport<
 		Block,
-		Transaction = TransactionFor<Client, Block>,
+		Transaction = sp_api::TransactionFor<Client, Block>,
 		Error = sp_consensus::Error,
 	>,
 	PClient: HeaderBackend<PBlock> + BlockBackend<PBlock> + ProvideRuntimeApi<PBlock> + 'static,
 	PClient::Api: ExecutorApi<PBlock, Block::Hash>,
-	Backend: sc_client_api::Backend<Block>,
+	Backend: sc_client_api::Backend<Block> + 'static,
+	TransactionFor<Backend, Block>: sp_trie::HashDBT<HashFor<Block>, sp_trie::DBValue>,
 	E: CodeExecutor,
 {
 	pub(crate) fn new(
@@ -334,7 +337,7 @@ where
 			return Ok(())
 		}
 
-		// TODO: Generate FraudProof for the first incorrect ER which is still not _confirmed_.
+		self.try_submit_fraud_proof_for_first_bad_receipt()?;
 
 		// Ideally, the receipt of current block will be included in the next block, i.e., no
 		// missing receipts.
@@ -518,6 +521,77 @@ where
 		}
 
 		Ok(())
+	}
+
+	fn try_submit_fraud_proof_for_first_bad_receipt(&self) -> Result<(), sp_blockchain::Error> {
+		if let Some((bad_receipt_number, bad_signed_receipt_hash, bad_receipt)) =
+			crate::aux_schema::load_first_bad_receipt_info::<_, Block, PBlock>(&*self.client)?
+		{
+			let block_number: BlockNumber = bad_receipt_number
+				.try_into()
+				.unwrap_or_else(|_| panic!("Primary number must fit into u32; qed"));
+			let block_hash = self.client.hash(block_number.into())?.ok_or_else(|| {
+				sp_blockchain::Error::Backend(format!(
+					"Header hash not found for number {block_number}"
+				))
+			})?;
+			let local_receipt = crate::aux_schema::load_execution_receipt::<
+				_,
+				Block::Hash,
+				NumberFor<PBlock>,
+				PBlock::Hash,
+			>(&*self.client, block_hash)?
+			.ok_or_else(|| {
+				sp_blockchain::Error::Backend(format!(
+					"Execution receipt not found for {block_hash:?}",
+				))
+			})?;
+
+			let trace_mismatch_index = crate::find_trace_mismatch(&local_receipt, &bad_receipt)
+				.expect("There must be a mismatch between the receipts; qed");
+			let fraud_proof = self
+				.fraud_proof_generator
+				.generate_proof::<PBlock>(
+					trace_mismatch_index,
+					&local_receipt,
+					bad_signed_receipt_hash,
+				)
+				.map_err(|err| {
+					sp_blockchain::Error::Application(Box::from(format!(
+						"Failed to generate fraud proof: {err}"
+					)))
+				})?;
+
+			self.submit_fraud_proof(fraud_proof);
+		}
+
+		Ok(())
+	}
+
+	fn submit_fraud_proof(&self, fraud_proof: FraudProof) {
+		let primary_chain_client = self.primary_chain_client.clone();
+		// TODO: No backpressure
+		self.spawner.spawn_blocking(
+			"cirrus-submit-fraud-proof",
+			None,
+			async move {
+				tracing::debug!(
+					target: LOG_TARGET,
+					"Submitting fraud proof in a background task..."
+				);
+				if let Err(error) = primary_chain_client.runtime_api().submit_fraud_proof_unsigned(
+					&BlockId::Hash(primary_chain_client.info().best_hash),
+					fraud_proof,
+				) {
+					tracing::debug!(
+						target: LOG_TARGET,
+						error = ?error,
+						"Failed to submit fraud proof"
+					);
+				}
+			}
+			.boxed(),
+		);
 	}
 
 	fn try_sign_and_send_receipt(
