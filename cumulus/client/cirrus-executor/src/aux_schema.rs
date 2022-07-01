@@ -11,12 +11,16 @@ use subspace_core_primitives::BlockNumber;
 const EXECUTION_RECEIPT_KEY: &[u8] = b"execution_receipt";
 const EXECUTION_RECEIPT_START: &[u8] = b"execution_receipt_start";
 const EXECUTION_RECEIPT_BLOCK_NUMBER: &[u8] = b"execution_receipt_block_number";
-const BAD_RECEIPT_KEY: &[u8] = b"bad_receipt";
+
+/// bad_receipt_block_number => all_bad_signed_receipt_hashes_at_this_block
 const BAD_RECEIPT_BLOCK_NUMBER: &[u8] = b"bad_receipt_block_number";
+/// bad_signed_receipt_hash => trace_mismatch_index
+const BAD_RECEIPT_MISMATCH_INDEX_KEY: &[u8] = b"bad_receipt_mismatch_index";
 /// Set of block numbers at which there is at least one bad receipt detected.
 ///
 /// NOTE: Unbounded but the size is not expected to be large.
 const BAD_RECEIPT_NUMBERS: &[u8] = b"bad_receipt_numbers";
+
 /// Prune the execution receipts when they reach this number.
 const PRUNING_DEPTH: BlockNumber = 1000;
 
@@ -24,8 +28,8 @@ fn execution_receipt_key(block_hash: impl Encode) -> Vec<u8> {
 	(EXECUTION_RECEIPT_KEY, block_hash).encode()
 }
 
-fn bad_receipt_key(signed_receipt_hash: impl Encode) -> Vec<u8> {
-	(BAD_RECEIPT_KEY, signed_receipt_hash).encode()
+fn bad_receipt_mismatch_index_key(signed_receipt_hash: impl Encode) -> Vec<u8> {
+	(BAD_RECEIPT_MISMATCH_INDEX_KEY, signed_receipt_hash).encode()
 }
 
 fn load_decode<Backend: AuxStore, T: Decode>(
@@ -121,11 +125,10 @@ pub(super) fn target_receipt_is_pruned(
 /// invalid receipt even it's less likely.
 pub(super) fn write_bad_receipt<Backend: AuxStore, Block: BlockT, PBlock: BlockT>(
 	backend: &Backend,
+	bad_receipt_number: NumberFor<PBlock>,
 	bad_signed_receipt_hash: H256,
-	bad_receipt: &ExecutionReceipt<NumberFor<PBlock>, PBlock::Hash, Block::Hash>,
+	trace_mismatch_index: u32,
 ) -> Result<(), sp_blockchain::Error> {
-	let bad_receipt_number = bad_receipt.primary_number;
-
 	let bad_receipt_number_key = (BAD_RECEIPT_BLOCK_NUMBER, bad_receipt_number).encode();
 	let mut bad_receipt_hashes =
 		load_decode::<_, Vec<H256>>(backend, bad_receipt_number_key.as_slice())?
@@ -133,8 +136,8 @@ pub(super) fn write_bad_receipt<Backend: AuxStore, Block: BlockT, PBlock: BlockT
 	bad_receipt_hashes.push(bad_signed_receipt_hash);
 
 	let mut to_insert = vec![
-		(bad_receipt_key(bad_signed_receipt_hash), bad_receipt.encode()),
 		(bad_receipt_number_key, bad_receipt_hashes.encode()),
+		(bad_receipt_mismatch_index_key(bad_signed_receipt_hash), trace_mismatch_index.encode()),
 	];
 
 	let mut bad_receipt_numbers =
@@ -159,8 +162,8 @@ pub(super) fn delete_bad_receipt<Backend: AuxStore>(
 	signed_receipt_hash: H256,
 ) -> Result<(), sp_blockchain::Error> {
 	let block_number_key = (BAD_RECEIPT_BLOCK_NUMBER, block_number).encode();
-	let mut hashes_at_block_number =
-		load_decode::<_, Vec<H256>>(backend, block_number_key.as_slice())?.unwrap_or_default();
+	let mut hashes_at_block_number: Vec<H256> =
+		load_decode(backend, block_number_key.as_slice())?.unwrap_or_default();
 
 	if let Some(index) = hashes_at_block_number.iter().position(|&x| x == signed_receipt_hash) {
 		hashes_at_block_number.swap_remove(index);
@@ -170,7 +173,7 @@ pub(super) fn delete_bad_receipt<Backend: AuxStore>(
 		)))
 	}
 
-	let mut keys_to_delete = vec![bad_receipt_key(signed_receipt_hash)];
+	let mut keys_to_delete = vec![bad_receipt_mismatch_index_key(signed_receipt_hash)];
 
 	let to_insert = if hashes_at_block_number.is_empty() {
 		keys_to_delete.push(block_number_key);
@@ -184,6 +187,7 @@ pub(super) fn delete_bad_receipt<Backend: AuxStore>(
 
 		if bad_receipt_numbers.is_empty() {
 			keys_to_delete.push(BAD_RECEIPT_NUMBERS.encode());
+
 			vec![]
 		} else {
 			vec![(BAD_RECEIPT_NUMBERS.encode(), bad_receipt_numbers.encode())]
@@ -198,35 +202,27 @@ pub(super) fn delete_bad_receipt<Backend: AuxStore>(
 	)
 }
 
-// (block_number_at_which_bad_receipt_was_generated, bad_signed_receipt_hash, bad_execution_receipt)
-type BadReceiptInfo<Block, PBlock> = (
-	NumberFor<PBlock>,
-	H256,
-	ExecutionReceipt<NumberFor<PBlock>, <PBlock as BlockT>::Hash, <Block as BlockT>::Hash>,
-);
+// (block_number_at_which_bad_receipt_was_created, bad_signed_receipt_hash, trace_mismatch_index)
+type BadReceiptInfo<Number> = (Number, H256, u32);
 
-pub(super) fn load_first_bad_receipt_info<Backend: AuxStore, Block: BlockT, PBlock: BlockT>(
+pub(super) fn load_first_bad_receipt_info<Backend: AuxStore, PBlock: BlockT>(
 	backend: &Backend,
-) -> Result<Option<BadReceiptInfo<Block, PBlock>>, sp_blockchain::Error> {
-	let bad_receipt_numbers =
-		load_decode::<_, Vec<NumberFor<PBlock>>>(backend, BAD_RECEIPT_NUMBERS.encode().as_slice())?
-			.unwrap_or_default();
+) -> Result<Option<BadReceiptInfo<NumberFor<PBlock>>>, sp_blockchain::Error> {
+	let bad_receipt_numbers: Vec<NumberFor<PBlock>> =
+		load_decode(backend, BAD_RECEIPT_NUMBERS.encode().as_slice())?.unwrap_or_default();
 
 	// bad_receipt_block_number_set is sorted already.
 	if let Some(bad_receipt_number) = bad_receipt_numbers.get(0).copied() {
 		let block_number_key = (BAD_RECEIPT_BLOCK_NUMBER, bad_receipt_number).encode();
-		let bad_signed_receipt_hashes =
-			load_decode::<_, Vec<H256>>(backend, block_number_key.as_slice())?.unwrap_or_default();
+		let bad_signed_receipt_hashes: Vec<H256> =
+			load_decode(backend, block_number_key.as_slice())?.unwrap_or_default();
 
 		let first_bad_signed_receipt_hash = bad_signed_receipt_hashes[0];
 
-		let first_bad_receipt = load_decode::<
-			_,
-			ExecutionReceipt<NumberFor<PBlock>, PBlock::Hash, Block::Hash>,
-		>(backend, first_bad_signed_receipt_hash.encode().as_slice())?
-		.expect("There must be at least one bad receipt as the set of bad receipt number is not empty; qed");
+		let trace_mismatch_index = load_decode(backend, first_bad_signed_receipt_hash.encode().as_slice())?
+			.expect("There must be at least one bad receipt as the set of bad receipt number is not empty; qed");
 
-		Ok(Some((bad_receipt_number, first_bad_signed_receipt_hash, first_bad_receipt)))
+		Ok(Some((bad_receipt_number, first_bad_signed_receipt_hash, trace_mismatch_index)))
 	} else {
 		Ok(None)
 	}

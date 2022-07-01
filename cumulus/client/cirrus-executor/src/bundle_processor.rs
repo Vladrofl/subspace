@@ -485,15 +485,19 @@ where
 			>(&*self.client, signed_receipt.execution_receipt.secondary_hash)?
 			{
 				Some(local_receipt) => {
-					if crate::find_trace_mismatch(&local_receipt, &signed_receipt.execution_receipt)
-						.is_some()
-					{
+					if let Some(trace_mismatch_index) = crate::find_trace_mismatch(
+						&local_receipt,
+						&signed_receipt.execution_receipt,
+					) {
 						// TODO: if the mismatch occurred in one of the trace, just caching the trace_mismatch_index
 						// instead of the whole execution receipt is enough to construct a fraud proof later.
 						crate::aux_schema::write_bad_receipt::<_, Block, PBlock>(
 							&*self.client,
+							signed_receipt.execution_receipt.primary_number,
 							signed_receipt.hash(),
-							&signed_receipt.execution_receipt,
+							trace_mismatch_index
+								.try_into()
+								.expect("Trace mismatch index must fit into u32; qed"),
 						)?;
 					}
 				},
@@ -502,8 +506,9 @@ where
 					// on the primary chain points to an invalid secondary block.
 					crate::aux_schema::write_bad_receipt::<_, Block, PBlock>(
 						&*self.client,
+						signed_receipt.execution_receipt.primary_number,
 						signed_receipt.hash(),
-						&signed_receipt.execution_receipt,
+						0u32,
 					)?;
 				},
 			}
@@ -527,8 +532,8 @@ where
 	}
 
 	fn try_submit_fraud_proof_for_first_bad_receipt(&self) -> Result<(), sp_blockchain::Error> {
-		if let Some((bad_receipt_number, bad_signed_receipt_hash, bad_receipt)) =
-			crate::aux_schema::load_first_bad_receipt_info::<_, Block, PBlock>(&*self.client)?
+		if let Some((bad_receipt_number, bad_signed_receipt_hash, trace_mismatch_index)) =
+			crate::aux_schema::load_first_bad_receipt_info::<_, PBlock>(&*self.client)?
 		{
 			let block_number: BlockNumber = bad_receipt_number
 				.try_into()
@@ -550,12 +555,10 @@ where
 				))
 			})?;
 
-			let trace_mismatch_index = crate::find_trace_mismatch(&local_receipt, &bad_receipt)
-				.expect("There must be a mismatch between the receipts; qed");
 			let fraud_proof = self
 				.fraud_proof_generator
 				.generate_proof::<PBlock>(
-					trace_mismatch_index,
+					trace_mismatch_index as usize,
 					&local_receipt,
 					bad_signed_receipt_hash,
 				)
