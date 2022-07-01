@@ -202,12 +202,10 @@ pub(super) fn delete_bad_receipt<Backend: AuxStore>(
 	)
 }
 
-// (block_number_at_which_bad_receipt_was_created, bad_signed_receipt_hash, trace_mismatch_index)
-type BadReceiptInfo<Number> = (Number, H256, u32);
-
+/// Returns a triple of (block_number_at_which_bad_receipt_was_created, bad_signed_receipt_hash, trace_mismatch_index) if any.
 pub(super) fn load_first_bad_receipt_info<Backend: AuxStore, PBlock: BlockT>(
 	backend: &Backend,
-) -> Result<Option<BadReceiptInfo<NumberFor<PBlock>>>, sp_blockchain::Error> {
+) -> Result<Option<(NumberFor<PBlock>, H256, u32)>, sp_blockchain::Error> {
 	let bad_receipt_numbers: Vec<NumberFor<PBlock>> =
 		load_decode(backend, BAD_RECEIPT_NUMBERS.encode().as_slice())?.unwrap_or_default();
 
