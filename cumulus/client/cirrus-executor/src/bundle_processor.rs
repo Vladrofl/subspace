@@ -488,6 +488,8 @@ where
 					if crate::find_trace_mismatch(&local_receipt, &signed_receipt.execution_receipt)
 						.is_some()
 					{
+						// TODO: if the mismatch occurred in one of the trace, just caching the trace_mismatch_index
+						// instead of the whole execution receipt is enough to construct a fraud proof later.
 						crate::aux_schema::write_bad_receipt::<_, Block, PBlock>(
 							&*self.client,
 							signed_receipt.hash(),
