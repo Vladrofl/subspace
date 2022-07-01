@@ -13,6 +13,9 @@ const EXECUTION_RECEIPT_START: &[u8] = b"execution_receipt_start";
 const EXECUTION_RECEIPT_BLOCK_NUMBER: &[u8] = b"execution_receipt_block_number";
 const BAD_RECEIPT_KEY: &[u8] = b"bad_receipt";
 const BAD_RECEIPT_BLOCK_NUMBER: &[u8] = b"bad_receipt_block_number";
+/// Set of block numbers at which there is at least one bad receipt detected.
+///
+/// NOTE: Unbounded but the size is not expected to be large.
 const BAD_RECEIPT_NUMBERS: &[u8] = b"bad_receipt_numbers";
 /// Prune the execution receipts when they reach this number.
 const PRUNING_DEPTH: BlockNumber = 1000;
@@ -111,8 +114,11 @@ pub(super) fn target_receipt_is_pruned(
 	best_execution_chain_number.saturating_sub(target_block) >= PRUNING_DEPTH
 }
 
-// Use `signed_receipt_hash` as key to avoid the potential collision that two dishonest
-// executors produced a same invalid ER even it's very unlikely.
+/// Writes a bad execution receipt to aux storage.
+///
+/// Use `bad_signed_receipt_hash` instead of the hash of execution receipt as key to
+/// avoid the potential collision that two dishonest executors produced an identical
+/// invalid receipt even it's less likely.
 pub(super) fn write_bad_receipt<Backend: AuxStore, Block: BlockT, PBlock: BlockT>(
 	backend: &Backend,
 	bad_signed_receipt_hash: H256,
@@ -120,20 +126,22 @@ pub(super) fn write_bad_receipt<Backend: AuxStore, Block: BlockT, PBlock: BlockT
 ) -> Result<(), sp_blockchain::Error> {
 	let bad_receipt_number = bad_receipt.primary_number;
 
-	let block_number_key = (BAD_RECEIPT_BLOCK_NUMBER, bad_receipt_number).encode();
-	let mut hashes_at_block_number =
-		load_decode::<_, Vec<H256>>(backend, block_number_key.as_slice())?.unwrap_or_default();
-	hashes_at_block_number.push(bad_signed_receipt_hash);
+	let bad_receipt_number_key = (BAD_RECEIPT_BLOCK_NUMBER, bad_receipt_number).encode();
+	let mut bad_receipt_hashes =
+		load_decode::<_, Vec<H256>>(backend, bad_receipt_number_key.as_slice())?
+			.unwrap_or_default();
+	bad_receipt_hashes.push(bad_signed_receipt_hash);
 
 	let mut to_insert = vec![
 		(bad_receipt_key(bad_signed_receipt_hash), bad_receipt.encode()),
-		(block_number_key, hashes_at_block_number.encode()),
+		(bad_receipt_number_key, bad_receipt_hashes.encode()),
 	];
 
 	let mut bad_receipt_numbers =
 		load_decode::<_, Vec<NumberFor<PBlock>>>(backend, BAD_RECEIPT_NUMBERS.encode().as_slice())?
 			.unwrap_or_default();
 
+	// The first bad receipt detected at this block number.
 	if !bad_receipt_numbers.contains(&bad_receipt_number) {
 		bad_receipt_numbers.push(bad_receipt_number);
 		to_insert.push((BAD_RECEIPT_NUMBERS.encode(), bad_receipt_numbers.encode()));
@@ -151,32 +159,37 @@ pub(super) fn delete_bad_receipt<Backend: AuxStore>(
 	signed_receipt_hash: H256,
 ) -> Result<(), sp_blockchain::Error> {
 	let block_number_key = (BAD_RECEIPT_BLOCK_NUMBER, block_number).encode();
-	let hashes_at_block_number =
+	let mut hashes_at_block_number =
 		load_decode::<_, Vec<H256>>(backend, block_number_key.as_slice())?.unwrap_or_default();
-	let new_hashes = hashes_at_block_number
-		.into_iter()
-		.filter(|&x| x != signed_receipt_hash)
-		.collect::<Vec<_>>();
+
+	if let Some(index) = hashes_at_block_number.iter().position(|&x| x == signed_receipt_hash) {
+		hashes_at_block_number.swap_remove(index);
+	} else {
+		return Err(sp_blockchain::Error::Backend(format!(
+			"Deleting a bad receipt {signed_receipt_hash:?} which does not exist, available: {hashes_at_block_number:?}"
+		)))
+	}
 
 	let mut keys_to_delete = vec![bad_receipt_key(signed_receipt_hash)];
 
-	let to_insert = if new_hashes.is_empty() {
+	let to_insert = if hashes_at_block_number.is_empty() {
 		keys_to_delete.push(block_number_key);
 
-		let bad_receipt_numbers =
+		let mut bad_receipt_numbers =
 			load_decode::<_, Vec<BlockNumber>>(backend, BAD_RECEIPT_NUMBERS.encode().as_slice())?
-				.expect("Set of bad receipt block number must not be empty; qed");
-		let new_bad_receipt_numbers =
-			bad_receipt_numbers.into_iter().map(|x| x != block_number).collect::<Vec<_>>();
+				.ok_or_else(|| {
+				sp_blockchain::Error::Backend("Stored bad receipt numbers must exist".into())
+			})?;
+		bad_receipt_numbers.retain(|x| *x != block_number);
 
-		if new_bad_receipt_numbers.is_empty() {
+		if bad_receipt_numbers.is_empty() {
 			keys_to_delete.push(BAD_RECEIPT_NUMBERS.encode());
 			vec![]
 		} else {
-			vec![(BAD_RECEIPT_NUMBERS.encode(), new_bad_receipt_numbers.encode())]
+			vec![(BAD_RECEIPT_NUMBERS.encode(), bad_receipt_numbers.encode())]
 		}
 	} else {
-		vec![(block_number_key, new_hashes.encode())]
+		vec![(block_number_key, hashes_at_block_number.encode())]
 	};
 
 	backend.insert_aux(
